@@ -58,7 +58,21 @@ def compute_accuracy(predictions: list[str], ground_truth: list[str]) -> float:
 
     Before writing code, complete specs/evaluation-spec.md.
     """
-    return 0.0
+    # Edge case: both empty means nothing was expected and nothing was
+    # produced — fully correct (1.0).
+    if not predictions and not ground_truth:
+        return 1.0
+
+    # Only one empty (a mismatch), or no ground truth to divide by → 0.0.
+    if not ground_truth:
+        return 0.0
+
+    correct = 0
+    for predicted, truth in zip(predictions, ground_truth):
+        if predicted == truth:
+            correct += 1
+
+    return correct / len(ground_truth)
 
 
 def compute_per_class_accuracy(
@@ -83,7 +97,28 @@ def compute_per_class_accuracy(
 
     Before writing code, complete specs/evaluation-spec.md.
     """
-    return {label: {"correct": 0, "total": 0, "accuracy": 0.0} for label in VALID_LABELS}
+    # 1. Initialize a result dict with a zeroed sub-dict per valid label.
+    result = {
+        label: {"correct": 0, "total": 0, "accuracy": 0.0}
+        for label in VALID_LABELS
+    }
+
+    # 2-3. Tally totals and correct counts grouped by the ground-truth label.
+    for predicted, truth in zip(predictions, ground_truth):
+        if truth not in VALID_LABELS:
+            continue  # skip labels we don't track (e.g. "unknown" ground truth)
+        result[truth]["total"] += 1
+        if predicted == truth:
+            result[truth]["correct"] += 1
+
+    # 4. Compute per-class accuracy, guarding against total == 0.
+    for label in result:
+        total = result[label]["total"]
+        if total > 0:
+            result[label]["accuracy"] = result[label]["correct"] / total
+
+    # 5. Return the result dict.
+    return result
 
 
 def format_evaluation_report(eval_results: dict) -> str:

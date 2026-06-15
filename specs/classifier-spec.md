@@ -91,10 +91,12 @@ the format below:" followed by the output format you chose.
 **What output format should you request from the LLM?**
 
 ```
-[blank — you need to parse the response in classify_episode(). What format
-makes parsing reliable? Think about: a single label on its own line?
-A structured format like "Label: X / Reasoning: Y"? JSON?
-What are the tradeoffs?]
+Request JSON: {"label": "<one of interview|solo|panel|narrative>",
+"reasoning": "<one or two sentences>"}. JSON maps directly to the required
+return dict and is robust to colons/commas/newlines in the reasoning that
+would break a "Label: X / Reasoning: Y" split. Tradeoff: the model may wrap
+it in code fences or add stray text, so parsing must strip fences and use
+try/except, falling back to label="unknown" on any failure.
 ```
 
 ---
@@ -102,8 +104,12 @@ What are the tradeoffs?]
 **Edge cases to handle in the prompt:**
 
 ```
-[blank — what if labeled_examples is empty? What if the description is very
-short? How does your prompt handle these?]
+If labeled_examples is empty, rather than quietly running a zero-shot prompt, I would raise an actual error so that the user is not classifying the topics in a likely inaccurate way without knowing unless they were looking at the logs.
+raise ValueError("labeled_examples is empty")
+
+If the description is empty, return "unknown" as the label for classify_episode() and show the error details in the returned description.
+
+If the description is only up to a few words, still try to pass it and classify it.
 ```
 
 ---
@@ -158,9 +164,32 @@ Extract the response text from:
 **Step 3 — Parse the response:**
 
 ```
-[blank — how do you extract the label and reasoning from the LLM's text output?
-What string operations or parsing logic do you need?
-This depends on the output format you chose in build_few_shot_prompt.]
+The output format is JSON, but LLMs sometimes wrap it in markdown fences
+(```json ... ```) or add a sentence before it. So parse defensively:
+strip whitespace and any code fences, then json.loads(). Pull "label" and
+"reasoning" out of the parsed dict, and normalize the label with
+.strip().lower() before validating it (Step 4). Wrap the whole thing in
+try/except so a bad response falls back to "unknown" instead of crashing
+(Step 5).
+
+    import json, re
+
+    raw = response.choices[0].message.content or ""
+    text = raw.strip()
+
+    # Strip markdown code fences if present, e.g. ```json ... ```
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    try:
+        parsed = json.loads(text)
+        label = str(parsed.get("label", "")).strip().lower()
+        reasoning = str(parsed.get("reasoning", "")).strip()
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        # Unparseable response — see Step 5
+        label = "unknown"
+        reasoning = f"Could not parse response: {raw!r}"
 ```
 
 ---
@@ -168,8 +197,7 @@ This depends on the output format you chose in build_few_shot_prompt.]
 **Step 4 — Validate the label:**
 
 ```
-[blank — what do you do if the LLM returns a label that isn't in VALID_LABELS?
-What should label be set to?]
+After normalizing the label, if the label could not be validated (not in VALID_LABELS), send "unknown" as the label and the error details in the reasoning.
 ```
 
 ---
@@ -177,9 +205,7 @@ What should label be set to?]
 **Step 5 — Handle errors gracefully:**
 
 ```
-[blank — what could go wrong? (Network error? Unparseable response?)
-What should the function return if something fails?
-Hint: the evaluation loop runs 20 calls — one bad response shouldn't crash everything.]
+For any of these errors: json.JSONDecodeError, AttributeError, and TypeError, we want to send the "unknown" label with the according error details in the reasoning. We do this by wrapping the parsing process with a try-catch statement.
 ```
 
 ---
@@ -212,24 +238,26 @@ any labels you're unsure about. Annotation quality is part of the lab.
 **Test: what does the raw LLM response look like for one episode?**
 
 ```
-Episode tested: [title]
-Raw response text: [paste it here]
+Episode tested: The Case for Four-Day Workweeks
+Raw response text: panel; The episode features the host and their friends discussing a topic, and they will also be joined by a relative of Michael Jackson's to share their perspective, indicating a discussion with multiple guests with roughly equal speaking time. This format is typical of a panel discussion.
 ```
 
 **How did you parse the label out of the response?**
 
 ```
-[describe the string operations — strip, split, lower, etc.]
+The requested output format was in JSON from the LLM. So, aside from removing code fencing with regex and extra whitespace with strip(), I mainly just used `parsed = json.loads(text)`
+Then, I would pull the individual label with this line: `str(parsed.get("label", "")).strip().lower()`
+After that, a try/catch statement was used to weed out parsing issues so that they would not result in an immediate error.
 ```
 
 **Did any episodes return `"unknown"`? If so, why?**
 
 ```
-[yes / no — if yes, what did the raw response look like?]
+No
 ```
 
 **One thing about the output format that surprised you:**
 
 ```
-[your answer here]
+The reasoning was clean, succinct, and stayed within a couple sentences.
 ```
